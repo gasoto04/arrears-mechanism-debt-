@@ -14,9 +14,9 @@ cat("Libraries loaded\n")
 ```
 
 ```{r paths}
-ids_dir             <- "C:/Users/gsoto/International Monetary Fund (PRD)/IEO-DIL - Documents/Data/WB IDS/WB IDS25"
-characteristics_dir <- "U:/dil/main-characteristics"
-output_dir          <- "U:/dil/bp3/output/resolution-mechanisms"
+ids_dir             <- "../ids"
+characteristics_dir <- "."
+output_dir          <- "output/ex7"
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 ```
 

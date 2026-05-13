@@ -15,10 +15,10 @@ cat("Libraries loaded\n")
 ```
 
 ```{r paths}
-ids_dir             <- "U:/dil/input/IDS"
-characteristics_dir <- "U:/dil/main-characteristics"
-mona_dir            <- "U:/dil/input/mona-description"
-output_dir          <- "U:/dil/bp3/output/arrears-lioa-lia/charts"
+ids_dir             <- "../ids"
+characteristics_dir <- "."
+mona_dir            <- "U:/dil/input/mona-description"   # adjust if available locally
+output_dir          <- "output/ex_arrears"
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 ```
 
