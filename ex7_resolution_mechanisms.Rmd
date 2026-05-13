@@ -1,0 +1,503 @@
+---
+title: "Exercise 7: Debt Resolution Mechanisms"
+subtitle: "BP3 — Fund's Role in International Debt Architecture"
+output: html_notebook
+---
+
+# Setup
+
+```{r setup, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(openxlsx)
+library(scales)
+cat("Libraries loaded\n")
+```
+
+```{r paths}
+ids_dir             <- "C:/Users/gsoto/International Monetary Fund (PRD)/IEO-DIL - Documents/Data/WB IDS/WB IDS25"
+characteristics_dir <- "U:/dil/main-characteristics"
+output_dir          <- "U:/dil/bp3/output/resolution-mechanisms"
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+```
+
+---
+
+# 1. Load IDS (6 Excel files)
+
+```{r load-ids}
+files <- c("A_D.xlsx", "E_K.xlsx", "L_M.xlsx", "N_Q.xlsx", "R_U.xlsx", "V_Z.xlsx")
+ids_list <- list()
+for (f in files) {
+  cat("Loading", f, "...\n")
+  ids_list[[f]] <- read.xlsx(file.path(ids_dir, f))
+  cat("  done:", format(nrow(ids_list[[f]]), big.mark = ","), "rows\n")
+}
+year_cols <- names(ids_list[[1]])[grepl("^\\d{4}$", names(ids_list[[1]]))]
+for (i in seq_along(ids_list)) {
+  ids_list[[i]][year_cols] <- lapply(ids_list[[i]][year_cols], as.character)
+}
+ids_raw <- bind_rows(ids_list)
+rm(ids_list); gc()
+cat("\nCombined:", format(nrow(ids_raw), big.mark = ","), "rows |",
+    n_distinct(ids_raw$Country.Name), "countries\n")
+```
+
+---
+
+# 2. Filter to key series
+
+```{r filter-series}
+keep_series <- c(
+  "DT.DOD.BLAT.CD",   # PPG bilateral (by counterpart country — used to split PC vs non-PC)
+  "DT.DOD.MLAT.CD",   # PPG multilateral (WLD = total; always outside framework)
+  "DT.DOD.PRVT.CD",   # PPG private (BND = bonds, PBNKS = commercial banks, WLD = total)
+  "DT.DOD.DPPG.CD",   # Total PPG DOD (denominator base)
+  "DT.DOD.DIMF.CD"    # IMF credit DOD (added to denominator; always outside framework)
+)
+
+ids_raw <- ids_raw %>% filter(Series.Code %in% keep_series)
+cat("Filtered:", format(nrow(ids_raw), big.mark = ","), "rows\n")
+ids_raw %>% count(Series.Code, Series.Name) %>% print(n = Inf)
+```
+
+---
+
+# 3. Remove aggregates
+
+```{r remove-aggregates}
+remove_these <- c(
+  "East Asia & Pacific (excluding high income)",
+  "Europe & Central Asia (excluding high income)",
+  "IDA only", "IDA total",
+  "Latin America & Caribbean (excluding high income)",
+  "Least developed countries: UN classification",
+  "Low & middle income", "Low income", "Lower middle income",
+  "Middle East & North Africa (excluding high income)",
+  "Middle East, North Africa, Afghanistan & Pakistan (excluding high income)",
+  "Middle income", "South Asia",
+  "Sub-Saharan Africa (excluding high income)",
+  "Upper middle income",
+  "Heavily indebted poor countries (HIPC)", "World"
+)
+ids_raw <- ids_raw %>% filter(!Country.Name %in% remove_these)
+cat("Countries after removing aggregates:", n_distinct(ids_raw$Country.Name), "\n")
+```
+
+---
+
+# 4. Reshape to long format
+
+```{r reshape}
+year_cols <- names(ids_raw)[grepl("^\\d{4}$", names(ids_raw))]
+
+ids_long <- ids_raw %>%
+  pivot_longer(cols = all_of(year_cols), names_to = "year", values_to = "value") %>%
+  mutate(year  = as.integer(year),
+         value = as.numeric(value)) %>%
+  filter(year >= 1970, year <= 2024, !is.na(value)) %>%
+  rename(country_code = Country.Code,
+         country_name = Country.Name,
+         ca_name      = `Counterpart-Area.Name`,
+         ca_code      = `Counterpart-Area.Code`,
+         series_name  = Series.Name,
+         series_code  = Series.Code) %>%
+  mutate(ca_code      = trimws(ca_code),
+         country_code = trimws(country_code))
+
+rm(ids_raw); gc()
+cat("ids_long:", format(nrow(ids_long), big.mark = ","), "rows\n")
+```
+
+---
+
+# 5. LIC classification
+
+```{r lic-classification}
+chars   <- read.xlsx(file.path(characteristics_dir, "country-characteristics.xlsx"), sheet = "main")
+lic_iso <- trimws(chars$iso)
+lic_iso <- lic_iso[!is.na(lic_iso) & lic_iso != ""]
+
+ids_long <- ids_long %>%
+  mutate(income_group = if_else(country_code %in% lic_iso, "LIC", "MIC"))
+
+cat("LIC:", n_distinct(ids_long$country_code[ids_long$income_group == "LIC"]),
+    "| MIC:", n_distinct(ids_long$country_code[ids_long$income_group == "MIC"]), "\n")
+```
+
+---
+
+# 6. Paris Club mapping
+
+PC members and accession years — identical to ex_arrears_v3.
+
+```{r pc-mapping}
+pc_mapping <- tribble(
+  ~ca_code,  ~pc_name,              ~accession_year,
+  "801",     "Australia",           1956,
+  "001",     "Austria",             1956,
+  "002",     "Belgium",             1956,
+  "301",     "Canada",              1956,
+  "003",     "Denmark",             1956,
+  "018",     "Finland",             1956,
+  "004",     "France",              1956,
+  "005",     "Germany, Fed. Rep.",  1956,
+  "021",     "Ireland",             1956,
+  "006",     "Italy",               1956,
+  "701",     "Japan",               1956,
+  "007",     "Netherlands",         1956,
+  "008",     "Norway",              1956,
+  "050",     "Spain",               1956,
+  "010",     "Sweden",              1956,
+  "011",     "Switzerland",         1956,
+  "012",     "United Kingdom",      1956,
+  "302",     "United States",       1956,
+  "087",     "Russian Federation",  1997,
+  "546",     "Israel",              2014,
+  "742",     "Korea, Republic of",  2016,
+  "431",     "Brazil",              2016
+)
+cat("PC members:", nrow(pc_mapping), "\n")
+```
+
+---
+
+# 7. Build debt components
+
+## 7a. Bilateral: PC vs. non-PC
+
+PC bilateral = sum of debt to creditors that were PC members at the time of the observation.
+Non-PC bilateral = total bilateral (WLD) minus PC bilateral.
+
+```{r bilateral}
+KEY <- c("country_code", "country_name", "year", "income_group")
+
+blat_total <- ids_long %>%
+  filter(series_code == "DT.DOD.BLAT.CD", ca_code == "WLD") %>%
+  select(all_of(KEY), blat_total = value)
+
+blat_pc <- ids_long %>%
+  filter(series_code == "DT.DOD.BLAT.CD",
+         ca_code %in% pc_mapping$ca_code) %>%
+  left_join(pc_mapping %>% select(ca_code, accession_year), by = "ca_code") %>%
+  filter(year >= accession_year) %>%
+  group_by(across(all_of(KEY))) %>%
+  summarise(blat_pc = sum(value, na.rm = TRUE), .groups = "drop")
+
+blat <- blat_total %>%
+  left_join(blat_pc, by = KEY) %>%
+  mutate(blat_pc    = replace_na(blat_pc, 0),
+         blat_nonpc = pmax(blat_total - blat_pc, 0))
+
+cat("Bilateral rows:", nrow(blat), "\n")
+```
+
+## 7b. Multilateral total
+
+```{r multilateral}
+mlat <- ids_long %>%
+  filter(series_code == "DT.DOD.MLAT.CD", ca_code == "WLD") %>%
+  select(all_of(KEY), mlat_total = value)
+
+cat("Multilateral rows:", nrow(mlat), "\n")
+```
+
+## 7c. Private: bonds, commercial banks, other
+
+Bonds = `DT.DOD.PRVT.CD` with `ca_code == "BND"`.
+Commercial banks = `DT.DOD.PRVT.CD` with `ca_code == "PBNKS"`.
+Other private = total private (WLD) minus bonds minus banks.
+
+```{r private}
+bonds <- ids_long %>%
+  filter(series_code == "DT.DOD.PRVT.CD", ca_code == "BND") %>%
+  group_by(across(all_of(KEY))) %>%
+  summarise(bonds_value = sum(value, na.rm = TRUE), .groups = "drop")
+
+banks <- ids_long %>%
+  filter(series_code == "DT.DOD.PRVT.CD", ca_code == "PBNKS") %>%
+  group_by(across(all_of(KEY))) %>%
+  summarise(banks_value = sum(value, na.rm = TRUE), .groups = "drop")
+
+prvt_total <- ids_long %>%
+  filter(series_code == "DT.DOD.PRVT.CD", ca_code == "WLD") %>%
+  select(all_of(KEY), prvt_total = value)
+
+prvt <- prvt_total %>%
+  left_join(bonds, by = KEY) %>%
+  left_join(banks, by = KEY) %>%
+  mutate(bonds_value   = replace_na(bonds_value, 0),
+         banks_value   = replace_na(banks_value, 0),
+         other_private = pmax(prvt_total - bonds_value - banks_value, 0))
+
+cat("Private rows:", nrow(prvt), "\n")
+cat("  Bonds (BND) obs:   ", nrow(bonds), "\n")
+cat("  Banks (PBNKS) obs: ", nrow(banks), "\n")
+```
+
+## 7d. Verify private counterparts in data
+
+```{r verify-private-ca}
+ids_long %>%
+  filter(series_code == "DT.DOD.PRVT.CD") %>%
+  distinct(ca_code, ca_name) %>%
+  arrange(ca_code) %>%
+  print(n = Inf)
+```
+
+## 7e. Total PPG and IMF credit
+
+```{r ppg-imf}
+total_ppg <- ids_long %>%
+  filter(series_code == "DT.DOD.DPPG.CD", ca_code == "WLD") %>%
+  select(all_of(KEY), total_ppg = value)
+
+imf <- ids_long %>%
+  filter(series_code == "DT.DOD.DIMF.CD", ca_code == "WLD") %>%
+  select(all_of(KEY), imf_value = value)
+
+cat("Total PPG rows:", nrow(total_ppg), "| IMF rows:", nrow(imf), "\n")
+```
+
+---
+
+# 8. Merge panel
+
+```{r merge}
+panel <- total_ppg %>%
+  left_join(blat,  by = KEY) %>%
+  left_join(mlat,  by = KEY) %>%
+  left_join(prvt,  by = KEY) %>%
+  left_join(imf,   by = KEY) %>%
+  mutate(across(c(blat_total, blat_pc, blat_nonpc,
+                  mlat_total,
+                  prvt_total, bonds_value, banks_value, other_private,
+                  imf_value),
+                ~ replace_na(., 0))) %>%
+  mutate(denominator = total_ppg + imf_value) %>%
+  filter(denominator > 0)
+
+cat("Panel:", format(nrow(panel), big.mark = ","), "rows |",
+    n_distinct(panel$country_code), "countries |",
+    min(panel$year), "–", max(panel$year), "\n")
+```
+
+---
+
+# 9. Resolution mechanism mapping
+
+Rules (from IEO team):
+
+| Category | Rule |
+|---|---|
+| Official covered (Paris Club / CF) | PC bilateral before 2020; **all** bilateral from 2020 (Common Framework) |
+| Official outside framework | Non-PC bilateral before 2020; **0** from 2020 |
+| Private banks covered (London Club) | Commercial banks (PBNKS) from 1976; 0 before |
+| Bond debt covered (CACs) | Bonds (BND) from 2003; 0 before |
+| Multilateral / IMF outside | All multilateral (PCS + non-PCS) + IMF credit; always outside |
+| Private outside framework | Other private (always) + banks before 1976 + bonds before 2003 |
+
+```{r mapping}
+panel <- panel %>%
+  mutate(
+    official_covered = if_else(year >= 2020, blat_total, blat_pc),
+    official_outside = if_else(year >= 2020, 0,          blat_nonpc),
+    banks_covered    = if_else(year >= 1976, banks_value, 0),
+    bonds_covered    = if_else(year >= 2003, bonds_value, 0),
+    multilateral_out = mlat_total + imf_value,
+    private_outside  = other_private +
+                       if_else(year < 1976, banks_value, 0) +
+                       if_else(year < 2003, bonds_value, 0)
+  )
+
+cats_raw <- c("official_covered", "banks_covered", "bonds_covered",
+              "official_outside", "private_outside", "multilateral_out")
+```
+
+---
+
+# 10. Convert to % of denominator
+
+```{r pct}
+cats_pct <- paste0("pct_", cats_raw)
+
+panel_pct <- panel %>%
+  mutate(across(all_of(cats_raw),
+                ~ . / denominator * 100,
+                .names = "pct_{.col}"))
+```
+
+---
+
+# 11. Quick diagnostic — LIC coverage check
+
+```{r diagnostic}
+panel_pct %>%
+  filter(income_group == "LIC") %>%
+  group_by(year) %>%
+  summarise(across(all_of(cats_pct), ~ median(., na.rm = TRUE)),
+            n_countries = n_distinct(country_code),
+            .groups = "drop") %>%
+  mutate(row_sum = rowSums(across(all_of(cats_pct)))) %>%
+  filter(year %in% c(1970, 1976, 1980, 1990, 2000, 2003, 2010, 2015, 2020, 2024)) %>%
+  print(width = Inf)
+```
+
+---
+
+# 12. Annual median for LICs + renormalize to 100 %
+
+The median of component percentages across countries does not sum to 100 %. We renormalize each year so the stacked areas fill the chart correctly.
+
+```{r annual-lic}
+annual_lic <- panel_pct %>%
+  filter(income_group == "LIC") %>%
+  group_by(year) %>%
+  summarise(across(all_of(cats_pct), ~ median(., na.rm = TRUE)),
+            n_countries = n_distinct(country_code),
+            .groups = "drop")
+
+annual_lic_norm <- annual_lic %>%
+  mutate(row_sum = rowSums(across(all_of(cats_pct))),
+         across(all_of(cats_pct), ~ . / row_sum * 100)) %>%
+  select(-row_sum)
+
+print(annual_lic_norm, n = Inf)
+```
+
+---
+
+# 13. Chart
+
+Stacking order: multilateral at bottom, official covered at top.
+Vertical dashed lines mark the three key framework dates.
+
+```{r chart, fig.width=10, fig.height=6}
+label_map <- c(
+  pct_official_covered = "Official covered (Paris Club / CF)",
+  pct_banks_covered    = "Private banks covered (London Club)",
+  pct_bonds_covered    = "Bond debt covered (CACs)",
+  pct_official_outside = "Official outside framework",
+  pct_private_outside  = "Private outside framework",
+  pct_multilateral_out = "Multilateral / IMF outside"
+)
+
+color_map <- c(
+  "Official covered (Paris Club / CF)"  = "#2d6a4f",
+  "Private banks covered (London Club)" = "#52b788",
+  "Bond debt covered (CACs)"            = "#74c0c4",
+  "Official outside framework"          = "#e07b54",
+  "Private outside framework"           = "#8b4513",
+  "Multilateral / IMF outside"          = "#5a4a42"
+)
+
+# Factor levels: first = bottom of stack, last = top of stack
+stack_levels <- c(
+  "Multilateral / IMF outside",
+  "Private outside framework",
+  "Official outside framework",
+  "Bond debt covered (CACs)",
+  "Private banks covered (London Club)",
+  "Official covered (Paris Club / CF)"
+)
+
+plot_data <- annual_lic_norm %>%
+  pivot_longer(cols = all_of(cats_pct), names_to = "mechanism", values_to = "pct") %>%
+  mutate(mechanism = recode(mechanism, !!!label_map),
+         mechanism = factor(mechanism, levels = stack_levels))
+
+p7 <- ggplot(plot_data, aes(x = year, y = pct, fill = mechanism)) +
+  geom_area(position = "stack", alpha = 0.88) +
+  geom_vline(xintercept = c(1976, 2003, 2020),
+             linetype = "dashed", color = "white", linewidth = 0.7) +
+  scale_fill_manual(values = color_map, name = NULL,
+                    guide  = guide_legend(nrow = 2, reverse = TRUE)) +
+  scale_x_continuous(breaks = seq(1970, 2025, 5), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 100, 20),
+                     labels = function(x) paste0(x, "%"),
+                     expand = c(0, 0)) +
+  labs(
+    title    = "Share of Debt Covered vs Outside Resolution Mechanisms",
+    subtitle = paste0("Median across LIC countries, normalized to 100%\n",
+                      "Dashed lines: 1976 (London Club), 2003 (CACs), 2020 (Common Framework)"),
+    x        = "Year",
+    y        = "Percent of total external debt"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position    = "bottom",
+    panel.grid.minor   = element_blank(),
+    panel.grid.major.x = element_blank(),
+    plot.title         = element_text(face = "bold", size = 13),
+    plot.subtitle      = element_text(size = 9, color = "grey40"),
+    legend.text        = element_text(size = 9)
+  )
+
+p7
+```
+
+---
+
+# 14. Save chart
+
+```{r save-chart}
+ggsave(file.path(output_dir, "ex7_resolution_mechanisms.png"),
+       p7, width = 10, height = 6, dpi = 300)
+cat("Chart saved\n")
+```
+
+---
+
+# 15. Export to Excel
+
+```{r export}
+wb_out <- createWorkbook()
+
+# Chart-ready data (normalized, for replication)
+addWorksheet(wb_out, "Chart - LIC (normalized)")
+writeData(wb_out, "Chart - LIC (normalized)",
+  annual_lic_norm %>%
+    select(year, n_countries, all_of(cats_pct)) %>%
+    rename(
+      `Official covered (Paris Club / CF)`  = pct_official_covered,
+      `Private banks covered (London Club)` = pct_banks_covered,
+      `Bond debt covered (CACs)`            = pct_bonds_covered,
+      `Official outside framework`          = pct_official_outside,
+      `Private outside framework`           = pct_private_outside,
+      `Multilateral / IMF outside`          = pct_multilateral_out
+    ))
+
+# Raw medians (before normalization)
+addWorksheet(wb_out, "Chart - LIC (raw median %)")
+writeData(wb_out, "Chart - LIC (raw median %)",
+  annual_lic %>%
+    select(year, n_countries, all_of(cats_pct)) %>%
+    rename(
+      `Official covered (Paris Club / CF)`  = pct_official_covered,
+      `Private banks covered (London Club)` = pct_banks_covered,
+      `Bond debt covered (CACs)`            = pct_bonds_covered,
+      `Official outside framework`          = pct_official_outside,
+      `Private outside framework`           = pct_private_outside,
+      `Multilateral / IMF outside`          = pct_multilateral_out
+    ))
+
+# Country-level detail for LICs
+addWorksheet(wb_out, "Panel - LIC detail")
+writeData(wb_out, "Panel - LIC detail",
+  panel_pct %>%
+    filter(income_group == "LIC") %>%
+    select(country_name, country_code, year,
+           blat_total, blat_pc, blat_nonpc,
+           mlat_total, bonds_value, banks_value, other_private, imf_value,
+           denominator,
+           all_of(cats_raw),
+           all_of(cats_pct)) %>%
+    arrange(country_name, year))
+
+# Reference: Paris Club member list
+addWorksheet(wb_out, "PC Members")
+writeData(wb_out, "PC Members", pc_mapping)
+
+excel_file <- file.path(output_dir, "ex7_resolution_mechanisms.xlsx")
+saveWorkbook(wb_out, excel_file, overwrite = TRUE)
+cat("Excel saved:", excel_file, "\n")
+```
