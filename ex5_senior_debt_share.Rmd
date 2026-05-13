@@ -1,0 +1,459 @@
+---
+title: "Exercise 5: Senior Debt Share in LICs"
+subtitle: "BP3 — Fund's Role in International Debt Architecture"
+output: html_notebook
+---
+
+# Setup
+
+```{r setup, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(data.table)
+library(openxlsx)
+library(scales)
+cat("✓ Libraries loaded\n")
+```
+
+```{r paths}
+ids_dir             <- "U:/dil/input/IDS"
+characteristics_dir <- "U:/dil/main-characteristics"
+output_dir          <- "U:/dil/bp3/output"
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+```
+
+---
+
+# Load and combine all 6 IDS files
+
+```{r load-ids}
+files <- c("A_D.xlsx", "E_K.xlsx", "L_M.xlsx", "N_Q.xlsx", "R_U.xlsx", "V_Z.xlsx")
+
+ids_list <- list()
+for (f in files) {
+  cat("Loading", f, "...\n")
+  ids_list[[f]] <- read.xlsx(file.path(ids_dir, f))
+  cat("  ✓", format(nrow(ids_list[[f]]), big.mark = ","), "rows\n")
+}
+
+year_cols <- names(ids_list[[1]])[grepl("^\\d{4}$", names(ids_list[[1]]))]
+
+for (i in seq_along(ids_list)) {
+  ids_list[[i]][year_cols] <- lapply(ids_list[[i]][year_cols], as.character)
+}
+
+ids_raw <- bind_rows(ids_list)
+rm(ids_list)
+gc()
+
+cat("✓ Combined:", format(nrow(ids_raw), big.mark = ","), "rows\n")
+cat("Countries:", n_distinct(ids_raw$Country.Name), "\n")
+cat("Series:", n_distinct(ids_raw$Series.Code), "\n")
+```
+
+---
+
+# Filter to key series only
+
+We need three series:
+
+- `DT.DOD.MLAT.CD` — PPG multilateral DOD (to extract PCS subset by counterpart area)
+- `DT.DOD.DIMF.CD` — IMF credit DOD (use of Fund credit)
+- `DT.DOD.DPPG.CD` — Total PPG DOD (denominator base)
+
+```{r filter-series}
+keep_series <- c(
+  "DT.DOD.MLAT.CD",   # PPG multilateral DOD
+  "DT.DOD.DIMF.CD",   # IMF credit DOD
+  "DT.DOD.DPPG.CD"    # Total PPG DOD
+)
+
+ids_raw <- ids_raw %>% filter(Series.Code %in% keep_series)
+cat("Filtered to key series:", format(nrow(ids_raw), big.mark = ","), "rows\n")
+```
+
+---
+
+# Remove regional aggregates
+
+```{r remove-aggregates}
+remove_these <- c(
+  "East Asia & Pacific (excluding high income)",
+  "Europe & Central Asia (excluding high income)",
+  "IDA only",
+  "IDA total",
+  "Latin America & Caribbean (excluding high income)",
+  "Least developed countries: UN classification",
+  "Low & middle income",
+  "Low income",
+  "Lower middle income",
+  "Middle East & North Africa (excluding high income)",
+  "Middle East, North Africa, Afghanistan & Pakistan (excluding high income)",
+  "Middle income",
+  "South Asia",
+  "Sub-Saharan Africa (excluding high income)",
+  "Upper middle income",
+  "Heavily indebted poor countries (HIPC)",
+  "World"
+)
+
+ids_raw <- ids_raw %>% filter(!Country.Name %in% remove_these)
+cat("After removing aggregates:", n_distinct(ids_raw$Country.Name), "countries\n")
+```
+
+---
+
+# Reshape to long format
+
+```{r reshape}
+year_cols <- names(ids_raw)[grepl("^\\d{4}$", names(ids_raw))]
+
+ids_long <- ids_raw %>%
+  pivot_longer(cols = all_of(year_cols), names_to = "year", values_to = "value") %>%
+  mutate(year  = as.integer(year),
+         value = as.numeric(value)) %>%
+  filter(year >= 1970, year <= 2024, !is.na(value)) %>%
+  rename(country_code = Country.Code,
+         country_name = Country.Name,
+         ca_name      = `Counterpart-Area.Name`,
+         ca_code      = `Counterpart-Area.Code`,
+         series_name  = Series.Name,
+         series_code  = Series.Code)
+
+ids_long <- ids_long %>% mutate(ca_name = trimws(ca_name))
+ids_long <- ids_long %>% mutate(country_code = trimws(country_code))
+
+
+rm(ids_raw)
+gc()
+cat("✓ ids_long:", format(nrow(ids_long), big.mark = ","), "rows\n")
+```
+
+---
+
+# LIC classification (country-characteristics.xlsx)
+
+```{r lic-classification}
+chars   <- read.xlsx(file.path(characteristics_dir, "country-characteristics.xlsx"), sheet = "main")
+lic_iso <- trimws(chars$iso)
+lic_iso <- lic_iso[!is.na(lic_iso) & lic_iso != ""]
+
+ids_long <- ids_long %>%
+  mutate(income_group = if_else(country_code %in% lic_iso, "LIC", "MIC"))
+
+cat("LIC:", n_distinct(ids_long$country_code[ids_long$income_group == "LIC"]),
+    "| MIC:", n_distinct(ids_long$country_code[ids_long$income_group == "MIC"]), "\n")
+
+```
+
+---
+
+# Define PCS institutions
+
+```{r pcs-codes}
+pcs_codes <- c(
+  "901",  # World Bank-IBRD
+  "905",  # World Bank-IDA
+  "902",  # World Bank-MIGA
+  "903",  # IFC
+  "988",  # IFAD
+  "911",  # BIS
+  "990",  # EBRD
+  "913",  # African Dev. Bank
+  "915",  # Asian Dev. Bank
+  "909",  # Inter-American Dev. Bank
+  "899",  # AIIB
+  "926",  # Council of Europe
+  "906",  # Caribbean Dev. Bank
+  "919",  # European Investment Bank
+  "957",  # BOAD
+  "887",  # NDB
+  "976",  # Islamic Dev. Bank
+  "920",  # CAF
+  "951",  # OPEC Fund
+  "973",  # Arab Monetary Fund
+  "953"   # BADEA
+)
+
+# Verify PCS codes match multilateral counterpart areas
+mlat_ca <- ids_long %>% filter(series_code == "DT.DOD.MLAT.CD") %>% distinct(ca_code)
+cat("PCS matched:", sum(pcs_codes %in% mlat_ca$ca_code), "of", length(pcs_codes), "\n")
+unmatched <- pcs_codes[!pcs_codes %in% mlat_ca$ca_code]
+if (length(unmatched) > 0) cat("Unmatched PCS codes:", paste(unmatched, collapse = ", "), "\n")
+```
+
+---
+
+# Build components
+
+## PCS multilateral debt
+
+```{r pcs-multilateral}
+# Sum individual PCS institutions per country-year
+multilateral_pcs <- ids_long %>%
+  filter(series_code == "DT.DOD.MLAT.CD",
+         ca_code %in% pcs_codes) %>%
+  group_by(country_name, country_code, year, income_group) %>%
+  summarise(pcs_value = sum(value, na.rm = TRUE), .groups = "drop")
+
+cat("PCS multilateral rows:", nrow(multilateral_pcs), "\n")
+```
+
+## IMF credit
+
+```{r imf-credit}
+imf <- ids_long %>%
+  filter(series_code == "DT.DOD.DIMF.CD", ca_code == "WLD") %>%
+  select(country_name, country_code, year, income_group, imf_value = value)
+
+cat("IMF credit rows:", nrow(imf), "\n")
+```
+
+## Total PPG
+
+```{r total-ppg}
+total_ppg <- ids_long %>%
+  filter(series_code == "DT.DOD.DPPG.CD", ca_code == "WLD") %>%
+  select(country_name, country_code, year, income_group, total_ppg_value = value)
+
+cat("Total PPG rows:", nrow(total_ppg), "\n")
+```
+
+---
+
+# Merge and compute senior debt share
+
+Senior debt = PCS multilateral + IMF credit
+
+Denominator = Total PPG + IMF credit (since IMF credit is separate from PPG in IDS methodology)
+
+```{r senior-share}
+senior <- total_ppg %>%
+  left_join(multilateral_pcs,
+            by = c("country_name", "country_code", "year", "income_group")) %>%
+  left_join(imf,
+            by = c("country_name", "country_code", "year", "income_group")) %>%
+  mutate(
+    pcs_value       = replace_na(pcs_value, 0),
+    imf_value       = replace_na(imf_value, 0),
+    total_ppg_value = replace_na(total_ppg_value, 0),
+    senior_debt     = pcs_value + imf_value,
+    denominator     = total_ppg_value + imf_value
+  ) %>%
+  filter(denominator > 0) %>%
+  mutate(senior_share = senior_debt / denominator * 100)
+
+cat("Senior share rows:", nrow(senior), "\n")
+cat("Year range:", min(senior$year), "-", max(senior$year), "\n")
+```
+
+---
+
+# Quick diagnostics
+
+```{r diagnostics}
+# Check distribution
+senior %>%
+  filter(income_group == "LIC") %>%
+  summarise(
+    n        = n(),
+    min      = min(senior_share),
+    q1       = quantile(senior_share, 0.25),
+    median   = median(senior_share),
+    mean     = mean(senior_share),
+    q3       = quantile(senior_share, 0.75),
+    max      = max(senior_share)
+  )
+
+# Country-year counts per year (LICs)
+senior %>%
+  filter(income_group == "LIC") %>%
+  count(year) %>%
+  print(n = Inf)
+```
+
+---
+
+# Aggregate: median, mean, IQR by year — LICs
+
+```{r aggregate-lic}
+senior_agg_lic <- senior %>%
+  filter(income_group == "LIC") %>%
+  group_by(year) %>%
+  summarise(
+    median_share = median(senior_share, na.rm = TRUE),
+    mean_share   = mean(senior_share, na.rm = TRUE),
+    q1_share     = quantile(senior_share, 0.25, na.rm = TRUE),
+    q3_share     = quantile(senior_share, 0.75, na.rm = TRUE),
+    n_countries  = n(),
+    .groups      = "drop"
+  )
+
+head(senior_agg_lic, 10)
+```
+
+---
+
+# Chart: Senior Debt Share in LICs
+
+```{r chart-lic, fig.width=9, fig.height=5.5}
+ggplot(senior_agg_lic, aes(x = year)) +
+  geom_ribbon(aes(ymin = q1_share, ymax = q3_share),
+              alpha = 0.12, fill = "grey50") +
+  geom_line(aes(y = median_share, color = "Median"),  linewidth = 0.9) +
+  geom_line(aes(y = mean_share,   color = "Average"), linewidth = 0.9) +
+  scale_color_manual(
+    values = c("Median" = "steelblue", "Average" = "orange")
+  ) +
+  scale_x_continuous(breaks = seq(1970, 2025, 5)) +
+  scale_y_continuous(breaks = seq(0, 100, 10)) +
+  labs(
+    title = "Senior Debt Share in LICs (% of Total External PPG Debt)",
+    x     = "Year",
+    y     = "Percent",
+    color = NULL
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank()
+  )
+```
+
+
+---
+
+# Export Excel
+
+```{r Export}
+wb_out <- createWorkbook()
+
+addWorksheet(wb_out, "Chart - LIC")
+writeData(wb_out, "Chart - LIC", senior_agg_lic)
+
+addWorksheet(wb_out, "Detail - LIC")
+writeData(wb_out, "Detail - LIC",
+  senior %>%
+    filter(income_group == "LIC") %>%
+    select(country_name, country_code, year,
+           pcs_value, imf_value, total_ppg_value,
+           senior_debt, denominator, senior_share) %>%
+    arrange(country_name, year))
+
+excel_file <- file.path(output_dir, "ex5_senior_debt_share.xlsx")
+saveWorkbook(wb_out, excel_file, overwrite = TRUE)
+cat("✓ Saved:", excel_file, "\n")
+```
+
+---
+
+# (Optional) Aggregate for MICs and All countries
+
+```{r aggregate-mic-all}
+# MIC
+senior_agg_mic <- senior %>%
+  filter(income_group == "MIC") %>%
+  group_by(year) %>%
+  summarise(
+    median_share = median(senior_share, na.rm = TRUE),
+    mean_share   = mean(senior_share, na.rm = TRUE),
+    q1_share     = quantile(senior_share, 0.25, na.rm = TRUE),
+    q3_share     = quantile(senior_share, 0.75, na.rm = TRUE),
+    n_countries  = n(),
+    .groups      = "drop"
+  )
+
+# All
+senior_agg_all <- senior %>%
+  group_by(year) %>%
+  summarise(
+    median_share = median(senior_share, na.rm = TRUE),
+    mean_share   = mean(senior_share, na.rm = TRUE),
+    q1_share     = quantile(senior_share, 0.25, na.rm = TRUE),
+    q3_share     = quantile(senior_share, 0.75, na.rm = TRUE),
+    n_countries  = n(),
+    .groups      = "drop"
+  )
+```
+
+---
+
+# Export to Excel
+
+```{r export-excel}
+wb_out <- createWorkbook()
+
+# --- Chart data ---
+addWorksheet(wb_out, "Chart - LIC")
+writeData(wb_out, "Chart - LIC", senior_agg_lic)
+
+addWorksheet(wb_out, "Chart - MIC")
+writeData(wb_out, "Chart - MIC", senior_agg_mic)
+
+addWorksheet(wb_out, "Chart - All")
+writeData(wb_out, "Chart - All", senior_agg_all)
+
+# --- Country-level detail (LICs only) ---
+addWorksheet(wb_out, "Detail - LIC")
+writeData(wb_out, "Detail - LIC",
+  senior %>%
+    filter(income_group == "LIC") %>%
+    select(country_name, country_code, year,
+           pcs_value, imf_value, total_ppg_value,
+           senior_debt, denominator, senior_share) %>%
+    arrange(country_name, year))
+
+# --- Reference: PCS institutions ---
+addWorksheet(wb_out, "PCS Institutions")
+writeData(wb_out, "PCS Institutions",
+  data.frame(ca_code = pcs_codes) %>%
+    left_join(
+      ids_long %>%
+        filter(series_code == "DT.DOD.MLAT.CD") %>%
+        distinct(ca_code, ca_name),
+      by = "ca_code") %>%
+    arrange(ca_name))
+
+# --- Reference: LIC list ---
+addWorksheet(wb_out, "LIC Countries")
+writeData(wb_out, "LIC Countries",
+  senior %>%
+    filter(income_group == "LIC") %>%
+    distinct(country_name, country_code) %>%
+    arrange(country_name))
+
+excel_file <- file.path(output_dir, "ex5_senior_debt_share.xlsx")
+saveWorkbook(wb_out, excel_file, overwrite = TRUE)
+cat("✓ Saved:", excel_file, "\n")
+```
+
+---
+
+# Save chart
+
+```{r save-chart}
+p <- ggplot(senior_agg_lic, aes(x = year)) +
+  geom_ribbon(aes(ymin = q1_share, ymax = q3_share),
+              alpha = 0.12, fill = "grey50") +
+  geom_line(aes(y = median_share, color = "Median"),  linewidth = 0.9) +
+  geom_line(aes(y = mean_share,   color = "Average"), linewidth = 0.9) +
+  scale_color_manual(
+    values = c("Median" = "steelblue", "Average" = "orange")
+  ) +
+  scale_x_continuous(breaks = seq(1970, 2025, 5)) +
+  scale_y_continuous(breaks = seq(0, 100, 10)) +
+  labs(
+    title = "Senior Debt Share in LICs (% of Total External PPG Debt)",
+    x     = "Year",
+    y     = "Percent",
+    color = NULL
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank()
+  )
+
+ggsave(file.path(output_dir, "ex5_senior_debt_share_lic.png"),
+       p, width = 9, height = 5.5, dpi = 300)
+cat("✓ Chart saved\n")
+```
