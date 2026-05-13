@@ -1,0 +1,48 @@
+International Monetary Fund
+World Bank Group 
+Int. Fund for Agricultural Development
+Bank for International Settlements
+European Bank for Reconstruction and Development
+African Development Bank
+Asian Development Bank
+Inter-American Development Bank
+Asian Infrastructure Investment Bank 
+Council of Europe Development Bank
+Caribbean Development Bank
+European Investment Bank
+European Financial Stability Mechanism
+Eurosystem
+European Stability Mechanism 
+West African Development Bank
+Chiang Mai Initiative Multilateralization 
+New Development Bank 
+BRICS Contingent Reserve Arrangement
+Islamic Development Bank 
+CAF - Development Bank of Latin America 
+OPEC Fund for International Development 
+Arab Monetary Fund 
+Arab Bank for Economic Development in Africa 
+Black Sea Trade and Development Bank
+
+pcs_codes <- c(
+  "901",  # World Bank-IBRD
+  "905",  # World Bank-IDA
+  "902",  # World Bank-MIGA
+  "903",  # IFC
+  "988",  # IFAD
+  "911",  # BIS
+  "990",  # EBRD
+  "913",  # African Dev. Bank
+  "915",  # Asian Dev. Bank
+  "909",  # Inter-American Dev. Bank
+  "899",  # AIIB
+  "926",  # Council of Europe
+  "906",  # Caribbean Dev. Bank
+  "919",  # European Investment Bank
+  "887",  # NDB
+  "976",  # Islamic Dev. Bank
+  "920",  # CAF
+  "951",  # OPEC Fund
+  "973",  # Arab Monetary Fund
+  "953"   # BADEA
+)

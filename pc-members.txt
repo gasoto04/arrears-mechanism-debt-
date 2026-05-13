@@ -1,0 +1,48 @@
+AUSTRALIA
+AUSTRIA
+BELGIUM
+BRAZIL
+CANADA
+DENMARK
+FINLAND
+FRANCE
+GERMANY
+IRELAND
+ISRAEL
+ITALY
+JAPAN
+NETHERLANDS
+NORWAY
+REPUBLIC OF KOREA
+RUSSIAN FEDERATION
+SPAIN
+SWEDEN
+SWITZERLAND
+UNITED KINGDOM
+UNITED STATES OF AMERICA
+
+pc_mapping <- tribble(
+  ~ca_code,  ~pc_name,              ~accession_year,
+  "801",     "Australia",           1956,
+  "001",     "Austria",             1956,
+  "002",     "Belgium",             1956,
+  "301",     "Canada",              1956,
+  "003",     "Denmark",             1956,
+  "018",     "Finland",             1956,
+  "004",     "France",              1956,
+  "005",     "Germany, Fed. Rep.",   1956,
+  "021",     "Ireland",             1956,
+  "006",     "Italy",               1956,
+  "701",     "Japan",               1956,
+  "007",     "Netherlands",         1956,
+  "008",     "Norway",              1956,
+  "050",     "Spain",               1956,
+  "010",     "Sweden",              1956,
+  "011",     "Switzerland",         1956,
+  "012",     "United Kingdom",      1956,
+  "302",     "United States",       1956,
+  "087",     "Russian Federation",  1997,
+  "546",     "Israel",              2014,
+  "742",     "Korea, Republic of",  2016,
+  "431",     "Brazil",              2016
+)
