@@ -223,13 +223,11 @@ bonds <- ids_long %>%
   filter(series_code == "DT.DOD.PBND.CD", ca_code == "WLD") %>%
   select(all_of(KEY), value)
 
-banks <- ids_long %>%
-  filter(series_code == "DT.DOD.PCBK.CD", ca_code == "WLD") %>%
-  select(all_of(KEY), value)
-
-other_private <- ids_long %>%
-  filter(series_code == "DT.DOD.PROP.CD", ca_code == "WLD") %>%
-  select(all_of(KEY), value)
+# Commercial banks = PCBK (bank loans) + PROP (other non-bonded private)
+banks_raw <- ids_long %>%
+  filter(series_code %in% c("DT.DOD.PCBK.CD", "DT.DOD.PROP.CD"), ca_code == "WLD") %>%
+  group_by(across(all_of(KEY))) %>%
+  summarise(value = sum(value, na.rm = TRUE), .groups = "drop")
 
 multilateral <- ids_long %>%
   filter(series_code == "DT.DOD.MLAT.CD", ca_code == "WLD") %>%
@@ -239,25 +237,25 @@ imf_comp <- ids_long %>%
   filter(series_code == "DT.DOD.DIMF.CD", ca_code == "WLD") %>%
   select(all_of(KEY), value)
 
-cat("Bonds:", nrow(bonds), "| Banks:", nrow(banks),
-    "| Other private:", nrow(other_private),
+cat("Bonds:", nrow(bonds), "| Banks (PCBK+PROP):", nrow(banks_raw),
     "| Multilateral:", nrow(multilateral), "\n")
 ```
 
 ```{r build-long-panel}
 # Stack all creditor types into one long dataframe
 panel_long <- bind_rows(
-  bilateral %>% select(all_of(KEY), value = blat_pc)    %>% mutate(creditor_type = "Bilateral PC"),
-  bilateral %>% select(all_of(KEY), value = blat_nonpc) %>% mutate(creditor_type = "Bilateral Non-PC"),
-  bonds         %>% mutate(creditor_type = "Bonds"),
-  banks         %>% mutate(creditor_type = "Commercial Banks"),
-  other_private %>% mutate(creditor_type = "Other Private"),
-  multilateral  %>% mutate(creditor_type = "Multilateral"),
-  imf_comp      %>% mutate(creditor_type = "IMF Credit")
+  bilateral  %>% select(all_of(KEY), value = blat_pc)    %>% mutate(creditor_type = "Bilateral PC"),
+  bilateral  %>% select(all_of(KEY), value = blat_nonpc) %>% mutate(creditor_type = "Bilateral Non-PC"),
+  bonds      %>% mutate(creditor_type = "Bonds"),
+  banks_raw  %>% mutate(creditor_type = "Commercial Banks"),   # PCBK + PROP
+  multilateral %>% mutate(creditor_type = "Multilateral"),
+  imf_comp   %>% mutate(creditor_type = "IMF Credit")
 ) %>%
   filter(!is.na(value), value >= 0)
 
 cat("Long panel rows:", format(nrow(panel_long), big.mark = ","), "\n")
+cat("Creditor types:\n")
+panel_long %>% count(creditor_type) %>% as.data.frame() %>% print()
 ```
 
 ---
@@ -283,7 +281,6 @@ panel_classified <- panel_long %>%
       creditor_type == "Commercial Banks" & year <  1976     ~ "Private outside framework",
       creditor_type == "Bonds"            & year >= 2003     ~ "Bond debt covered (CACs)",
       creditor_type == "Bonds"            & year <  2003     ~ "Private outside framework",
-      creditor_type == "Other Private"                        ~ "Private outside framework",
       creditor_type %in% c("Multilateral", "IMF Credit")     ~ "Multilateral / IMF outside",
       TRUE                                                    ~ "Private outside framework"
     )
