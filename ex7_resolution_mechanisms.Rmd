@@ -497,8 +497,9 @@ Rules (from economist):
   Bilateral PC        → "Official covered (Paris Club / CF)" — always
   Bilateral Non-PC    → "Official covered (Paris Club / CF)" — from 2020 (Common Framework)
                       → "Official outside framework"         — before 2020
-  Commercial Banks    → "Private banks covered (London Club)" — from 1976
-                      → "Private outside framework"           — before 1976
+  Commercial Banks    → "Private banks covered (London Club)" — 1976 to 2002
+                      → "Private outside framework"           — before 1976 OR from 2003
+                        (London Club ceased when bonds/CACs became dominant)
   Bonds               → "Bond debt covered (CACs)"            — from 2003
                       → "Private outside framework"           — before 2003
   Other Private       → "Private outside framework"           — always (no mechanism)
@@ -513,9 +514,9 @@ panel_classified <- panel_long %>%
       creditor_type == "Bilateral Non-PC" & year >= 2020   ~ "Official covered (Paris Club / CF)",
       creditor_type == "Bilateral Non-PC" & year <  2020   ~ "Official outside framework",
 
-      # --- Private banks: London Club formed in 1976 ---
-      creditor_type == "Commercial Banks" & year >= 1976   ~ "Private banks covered (London Club)",
-      creditor_type == "Commercial Banks" & year <  1976   ~ "Private outside framework",
+      # --- Private banks: London Club active 1976–2002; ceased from 2003 ---
+      creditor_type == "Commercial Banks" & year >= 1976 & year < 2003 ~ "Private banks covered (London Club)",
+      creditor_type == "Commercial Banks"                               ~ "Private outside framework",
 
       # --- Bonds: CACs became standard in 2003 ---
       creditor_type == "Bonds"            & year >= 2003   ~ "Bond debt covered (CACs)",
