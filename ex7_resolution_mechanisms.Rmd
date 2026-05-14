@@ -595,6 +595,7 @@ panel_classified %>%
   mutate(share_pct = round(100 * total_debt_bn / sum(total_debt_bn), 1)) %>%
   filter(covered == TRUE) %>%
   select(year, covered_pct = share_pct) %>%
+  
   as.data.frame() %>%
   print()
 ```
