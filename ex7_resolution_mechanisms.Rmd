@@ -547,6 +547,8 @@ panel_classified %>%
   print()
 ```
 
+
+
 ```{r diagnostic-switches}
 # Diagnostic 2: verify that the year-threshold switches happen at the RIGHT years
 # Run this block to confirm 1976, 2003, and 2020 break points
@@ -657,13 +659,15 @@ Step 2 — Renormalize: Divide each mechanism's median by the sum of all medians
 We produce three aggregates: LIC-only, MIC-only, All (both groups).
 
 ```{r annual-aggregate}
+# In geom_area, the LAST factor level sits at the BOTTOM of the stack.
+# List Multilateral first (top) and Official covered last (bottom).
 mechs_ordered <- c(
-  "Official covered (Paris Club / CF)",   # bottom of chart (matches reference)
-  "Private banks covered (London Club)",
-  "Bond debt covered (CACs)",
-  "Official outside framework",
+  "Multilateral / IMF outside",            # first  → TOP of chart
   "Private outside framework",
-  "Multilateral / IMF outside"             # top of chart
+  "Official outside framework",
+  "Bond debt covered (CACs)",
+  "Private banks covered (London Club)",
+  "Official covered (Paris Club / CF)"     # last   → BOTTOM of chart
 )
 
 # Reusable function: aggregate one group, produce normalized annual data
@@ -743,12 +747,12 @@ Vertical dashed lines mark the three structural breaks.
 
 ```{r chart-function}
 color_map <- c(
-  "Official covered (Paris Club / CF)"   = "#2d6a4f",   # dark green
-  "Private banks covered (London Club)"  = "#52b788",   # light green
-  "Bond debt covered (CACs)"             = "#74c0c4",   # teal
-  "Official outside framework"           = "#e07b54",   # orange
-  "Private outside framework"            = "#8b4513",   # brown
-  "Multilateral / IMF outside"           = "#5a4a42"    # dark grey-brown
+  "Official covered (Paris Club / CF)"   = "#1b4332",   # dark green   (bottom)
+  "Private banks covered (London Club)"  = "#95d5b2",   # light green
+  "Bond debt covered (CACs)"             = "#52b788",   # medium green
+  "Official outside framework"           = "#e76f51",   # dark orange
+  "Private outside framework"            = "#f4a261",   # light orange
+  "Multilateral / IMF outside"           = "#6d4c41"    # brown        (top)
 )
 
 # Reference lines at the three structural breaks
@@ -757,7 +761,7 @@ transitions <- data.frame(
   label      = c("London Club\n(1976)", "CACs\n(2003)", "Common\nFramework\n(2020)")
 )
 
-make_chart <- function(annual_data, subtitle_text) {
+make_chart <- function(annual_data) {
   ggplot(annual_data,
          aes(x = year, y = pct_norm, fill = mechanism)) +
     geom_area(position = "stack", alpha = 0.88) +
@@ -776,14 +780,12 @@ make_chart <- function(annual_data, subtitle_text) {
       aes(x = xintercept + 0.4, y = 97, label = label),
       inherit.aes = FALSE,
       hjust       = 0, vjust = 1,
-      size        = 2.8, color = "grey20", lineheight = 0.85
+      size        = 5.5, color = "grey20", lineheight = 0.85
     ) +
     scale_fill_manual(
       values = color_map,
       name   = NULL,
-      # Default legend order: first factor level at top = "Official covered"
-      # This matches the reference chart's legend ordering
-      guide  = guide_legend(nrow = 2)
+      guide  = guide_legend(nrow = 2, reverse = TRUE)  # reverse so legend matches chart bottom→top
     ) +
     scale_x_continuous(breaks = seq(1970, 2025, 5), expand = c(0, 0)) +
     scale_y_continuous(
@@ -791,28 +793,21 @@ make_chart <- function(annual_data, subtitle_text) {
       labels = function(x) paste0(x, "%"),
       expand = c(0, 0)
     ) +
-    labs(
-      title    = "Share of Debt Covered vs Outside Resolution Mechanisms",
-      subtitle = subtitle_text,
-      x        = "Year",
-      y        = "Percent of total external debt"
-    ) +
-    theme_minimal(base_size = 12) +
+    labs(x = "Year", y = "Percent of total external debt") +
+    theme_minimal(base_size = 24) +
     theme(
       legend.position    = "bottom",
       panel.grid.minor   = element_blank(),
       panel.grid.major.x = element_blank(),
-      plot.title         = element_text(face = "bold", size = 13),
-      plot.subtitle      = element_text(size = 9, color = "grey40"),
-      legend.text        = element_text(size = 9)
+      legend.text        = element_text(size = 18)
     )
 }
 ```
 
 ```{r charts, fig.width=10, fig.height=6}
-p_lic <- make_chart(annual_lic, "Median across LIC countries, normalized to 100%")
-p_mic <- make_chart(annual_mic, "Median across MIC countries, normalized to 100%")
-p_all <- make_chart(annual_all, "Median across all developing countries, normalized to 100%")
+p_lic <- make_chart(annual_lic)
+p_mic <- make_chart(annual_mic)
+p_all <- make_chart(annual_all)
 
 p_lic
 ```
