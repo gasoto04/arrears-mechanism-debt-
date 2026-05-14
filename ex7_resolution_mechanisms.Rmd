@@ -758,7 +758,7 @@ color_map <- c(
 # Reference lines at the three structural breaks
 transitions <- data.frame(
   xintercept = c(1976, 2003, 2020),
-  label      = c("London Club\n(1976)", "CACs\n(2003)", "Common\nFramework\n(2020)")
+  label      = c("London Club\n(1976)", "CACs\n(2003)", "CF\n(2020)")
 )
 
 make_chart <- function(annual_data) {
@@ -780,7 +780,7 @@ make_chart <- function(annual_data) {
       aes(x = xintercept + 0.4, y = 97, label = label),
       inherit.aes = FALSE,
       hjust       = 0, vjust = 1,
-      size        = 5.5, color = "grey20", lineheight = 0.85
+      size        = 5.0, color = "grey20", lineheight = 0.85
     ) +
     scale_fill_manual(
       values = color_map,
@@ -794,12 +794,12 @@ make_chart <- function(annual_data) {
       expand = c(0, 0)
     ) +
     labs(x = "Year", y = "Percent of total external debt") +
-    theme_minimal(base_size = 24) +
+    theme_minimal(base_size = 20) +
     theme(
       legend.position    = "bottom",
       panel.grid.minor   = element_blank(),
       panel.grid.major.x = element_blank(),
-      legend.text        = element_text(size = 18)
+      legend.text        = element_text(size = 12)
     )
 }
 ```
@@ -808,8 +808,8 @@ make_chart <- function(annual_data) {
 p_lic <- make_chart(annual_lic)
 p_mic <- make_chart(annual_mic)
 p_all <- make_chart(annual_all)
-
-p_lic
+p_all
+#p_lic
 ```
 
 ```{r chart-mic, fig.width=10, fig.height=6}
